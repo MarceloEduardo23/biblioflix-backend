@@ -1,0 +1,23 @@
+// Loan Service — dono dos empréstimos e reservas (loan_db).
+// Guarda apenas bookId/userId; os detalhes de livro e usuário vêm por HTTP
+// do Catalog Service e do Auth Service.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Loan {
+  id         String    @id @default(cuid())
+  bookId     String
+  userId     String
+  loanDate   DateTime  @default(now())
+  dueDate    DateTime
+  returnDate DateTime?
+  pickedUpAt DateTime?
+  renewals   Int       @default(0)
+  createdAt  DateTime  @default(now())
+}

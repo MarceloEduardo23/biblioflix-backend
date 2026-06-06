@@ -1,0 +1,54 @@
+// Catalog Service — dono do acervo (catalog_db): livros, categorias, slides
+// e avaliações. A disponibilidade (availableCopies) é mantida aqui e ajustada
+// pelo Loan Service via HTTP (reserve-copy / release-copy).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Book {
+  id              String   @id @default(cuid())
+  title           String
+  author          String
+  cover           String   @default("")
+  genre           String   @default("")
+  isbn            String   @default("")
+  description     String   @default("")
+  publishedYear   Int      @default(0)
+  totalCopies     Int      @default(1)
+  availableCopies Int      @default(1)
+  rating          Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  ratings Rating[]
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+model Slide {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  imageUrl    String
+  createdAt   DateTime @default(now())
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  bookId    String
+  userId    String
+  value     Int
+  createdAt DateTime @default(now())
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, userId])
+}

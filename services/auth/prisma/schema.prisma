@@ -1,0 +1,24 @@
+// Auth Service — dono dos dados de usuário (database-per-service: auth_db).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  librarian
+  reader
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String // hash bcrypt
+  role      Role     @default(reader)
+  createdAt DateTime @default(now())
+}

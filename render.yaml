@@ -1,0 +1,98 @@
+# Render Blueprint (ponto de partida) — deploy gratuito dos microsserviços.
+# Suba este repositório no GitHub e crie um "Blueprint" no Render apontando aqui.
+#
+# Depois do PRIMEIRO deploy, ajuste no painel as variáveis *_URL do gateway/loan/
+# fine/recommendation com as URLs públicas reais (https://<servico>.onrender.com)
+# e faça redeploy. Preencha também os DATABASE_URL (Neon) e o AUTH_SECRET.
+services:
+  - type: web
+    name: biblioflix-auth
+    runtime: docker
+    rootDir: services/auth
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8001
+      - key: DATABASE_URL
+        sync: false        # cole a connection string do auth_db (Neon)
+      - key: AUTH_SECRET
+        sync: false        # MESMO valor do gateway
+
+  - type: web
+    name: biblioflix-catalog
+    runtime: docker
+    rootDir: services/catalog
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8002
+      - key: DATABASE_URL
+        sync: false        # catalog_db
+
+  - type: web
+    name: biblioflix-loan
+    runtime: docker
+    rootDir: services/loan
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8003
+      - key: DATABASE_URL
+        sync: false        # loan_db
+      - key: GRAVE_OVERDUE_DAYS
+        value: 7
+      - key: CATALOG_URL
+        sync: false        # https://biblioflix-catalog.onrender.com
+      - key: AUTH_URL
+        sync: false        # https://biblioflix-auth.onrender.com
+
+  - type: web
+    name: biblioflix-fine
+    runtime: docker
+    rootDir: services/fine
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8004
+      - key: DATABASE_URL
+        sync: false        # fine_db
+      - key: LOAN_URL
+        sync: false        # https://biblioflix-loan.onrender.com
+
+  - type: web
+    name: biblioflix-recommendation
+    runtime: docker
+    rootDir: services/recommendation
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8005
+      - key: DATABASE_URL
+        sync: false        # reco_db
+      - key: CATALOG_URL
+        sync: false        # https://biblioflix-catalog.onrender.com
+      - key: LOAN_URL
+        sync: false        # https://biblioflix-loan.onrender.com
+
+  - type: web
+    name: biblioflix-gateway
+    runtime: docker
+    rootDir: services/gateway
+    plan: free
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: AUTH_SECRET
+        sync: false        # MESMO valor do auth
+      - key: FRONTEND_ORIGIN
+        sync: false        # URL do frontend na Vercel
+      - key: AUTH_URL
+        sync: false
+      - key: CATALOG_URL
+        sync: false
+      - key: LOAN_URL
+        sync: false
+      - key: FINE_URL
+        sync: false
+      - key: RECOMMENDATION_URL
+        sync: false

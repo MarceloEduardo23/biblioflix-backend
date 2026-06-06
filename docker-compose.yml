@@ -1,0 +1,112 @@
+# Orquestração local dos microsserviços do BiblioFlix (ver §7.3 do relatório).
+# Sobe um Postgres (com um banco lógico por serviço) e cada microsserviço
+# em seu próprio container. O frontend conversa SÓ com o api-gateway (:8000).
+services:
+  postgres:
+    image: postgres:16
+    container_name: biblioflix-postgres
+    environment:
+      POSTGRES_USER: biblioflix
+      POSTGRES_PASSWORD: biblioflix
+      POSTGRES_DB: biblioflix
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biblioflix"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth-service:
+    build: ./services/auth
+    container_name: biblioflix-auth
+    environment:
+      PORT: 8001
+      DATABASE_URL: postgresql://biblioflix:biblioflix@postgres:5432/auth_db
+      AUTH_SECRET: ${AUTH_SECRET:-dev-secret-troque-em-producao}
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  catalog-service:
+    build: ./services/catalog
+    container_name: biblioflix-catalog
+    environment:
+      PORT: 8002
+      DATABASE_URL: postgresql://biblioflix:biblioflix@postgres:5432/catalog_db
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  loan-service:
+    build: ./services/loan
+    container_name: biblioflix-loan
+    environment:
+      PORT: 8003
+      DATABASE_URL: postgresql://biblioflix:biblioflix@postgres:5432/loan_db
+      CATALOG_URL: http://catalog-service:8002
+      AUTH_URL: http://auth-service:8001
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fine-service:
+    build: ./services/fine
+    container_name: biblioflix-fine
+    environment:
+      PORT: 8004
+      DATABASE_URL: postgresql://biblioflix:biblioflix@postgres:5432/fine_db
+      LOAN_URL: http://loan-service:8003
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  recommendation-service:
+    build: ./services/recommendation
+    container_name: biblioflix-recommendation
+    environment:
+      PORT: 8005
+      DATABASE_URL: postgresql://biblioflix:biblioflix@postgres:5432/reco_db
+      CATALOG_URL: http://catalog-service:8002
+      LOAN_URL: http://loan-service:8003
+    ports:
+      - "8005:8005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-gateway:
+    build: ./services/gateway
+    container_name: biblioflix-gateway
+    environment:
+      PORT: 8000
+      AUTH_SECRET: ${AUTH_SECRET:-dev-secret-troque-em-producao}
+      AUTH_URL: http://auth-service:8001
+      CATALOG_URL: http://catalog-service:8002
+      LOAN_URL: http://loan-service:8003
+      FINE_URL: http://fine-service:8004
+      RECOMMENDATION_URL: http://recommendation-service:8005
+      # Origem do frontend liberada no CORS:
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+    ports:
+      - "8080:8000"
+    depends_on:
+      - auth-service
+      - catalog-service
+      - loan-service
+      - fine-service
+      - recommendation-service
+
+volumes:
+  pgdata:

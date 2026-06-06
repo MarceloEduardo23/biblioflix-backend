@@ -1,0 +1,23 @@
+// Recommendation/Notification Service — recomendações por categoria/histórico
+// e notificações de vencimento/atraso/reserva (reco_db).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String // due_soon | overdue | reservation_expiring | info
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  refId     String? // id do empréstimo/reserva relacionado (evita duplicar)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, type, refId])
+}
