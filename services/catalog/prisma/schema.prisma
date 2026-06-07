@@ -52,3 +52,10 @@ model Rating {
 
   @@unique([bookId, userId])
 }
+
+// Tabela de controle de seeds: garante que cada seed rode apenas uma vez,
+// independente de quantos registros existam nas outras tabelas.
+model SeedMeta {
+  key       String   @id
+  createdAt DateTime @default(now())
+}
