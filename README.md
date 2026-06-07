@@ -1,127 +1,164 @@
-# BiblioFlix — Backend (Microsserviços)
+# BiblioFlix — Backend
 
-Backend do sistema de biblioteca **BiblioFlix**, organizado em microsserviços
-independentes atrás de um **API Gateway**, conforme a arquitetura do relatório
-(seções 6.1–6.3 e 7.3). O frontend (repositório separado `biblioflix-frontend`)
-conversa **apenas** com o gateway.
+API de uma biblioteca digital, organizada em microsserviços independentes atrás
+de um API Gateway. Cada serviço tem responsabilidade única e banco de dados
+próprio (*database-per-service*); o frontend conversa exclusivamente com o
+gateway.
+
+## Sumário
+
+- [Arquitetura](#arquitetura)
+- [Serviços e rotas](#serviços-e-rotas)
+- [Tecnologias](#tecnologias)
+- [Execução local](#execução-local-docker-compose)
+- [Variáveis de ambiente](#variáveis-de-ambiente)
+- [Regras de negócio](#regras-de-negócio)
+- [Deploy](#deploy)
+- [Limitações conhecidas](#limitações-conhecidas)
 
 ## Arquitetura
 
 ```
-            ┌────────────────────────┐
-  Frontend  │     API Gateway        │  :8000
-  (Next.js) │  - valida JWT          │
-   ───────► │  - injeta identidade   │
-            │  - roteia por prefixo  │
-            │  - agrega /health      │
-            └───────────┬────────────┘
-        ┌────────┬──────┼───────┬──────────────┐
-        ▼        ▼      ▼       ▼              ▼
-   Auth :8001  Catalog Loan   Fine        Recommendation/
-               :8002  :8003   :8004        Notification :8005
-        │        │      │       │              │
-     auth_db  catalog_db loan_db fine_db      reco_db   (um banco por serviço)
+                       ┌─────────────────────────┐
+   Frontend (Next.js)  │       API Gateway       │  :8000
+        ──────────────►│  • valida o JWT         │
+                       │  • injeta a identidade  │
+                       │  • roteia por prefixo   │
+                       │  • agrega /health       │
+                       └────────────┬────────────┘
+            ┌───────────┬───────────┼───────────┬───────────────┐
+            ▼           ▼           ▼           ▼               ▼
+        Auth :8001  Catalog    Loan :8003   Fine :8004    Recommendation
+                    :8002                                     :8005
+            │           │           │           │               │
+         auth_db   catalog_db    loan_db     fine_db          reco_db
 ```
 
-Cada serviço:
-- tem responsabilidade única e **banco próprio** (database-per-service);
-- expõe `GET /health` (usado pela tela administrativa de status, §6.5 / PB18);
-- aplica suas próprias regras de negócio (o gateway só roteia e autentica).
+Cada microsserviço:
 
-Comunicação entre serviços é feita por **HTTP**. Exemplos:
-- o **Loan** chama o **Catalog** para reservar/liberar cópias (`reserve-copy`/`release-copy`);
-- o **Loan** chama o **Auth** para resolver dados do leitor;
-- o **Fine** e o **Recommendation** leem os empréstimos do **Loan** (`/loans/raw`);
-- o **Gateway** agrega `/stats` de Catalog + Auth + Loan para montar `/reports`.
+- mantém um único domínio de negócio e o seu próprio banco lógico, sem tabelas
+  compartilhadas;
+- expõe `GET /health`, consumido pela tela administrativa de status;
+- concentra as próprias regras de negócio — o gateway apenas autentica e roteia.
 
-## Serviços e principais rotas (via gateway)
+A comunicação entre serviços é feita por HTTP na rede interna. Por exemplo: o
+Loan chama o Catalog para reservar e liberar cópias; o Loan consulta o Auth para
+resolver os dados do leitor; Fine e Recommendation leem os empréstimos do Loan;
+e o gateway agrega as estatísticas de Catalog, Auth e Loan para montar os
+relatórios.
 
-| Serviço | Porta | Rotas (prefixo no gateway) |
-|---|---|---|
-| api-gateway | 8000 | `/health`, `/health/services`, `/reports` |
-| auth | 8001 | `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`, `/auth/users` |
-| catalog | 8002 | `/catalog/books`, `/catalog/categories`, `/catalog/slides` |
-| loan | 8003 | `/loans`, `/loans/:id/return`, `/loans/:id/renew`, `/loans/:id/pickup` |
-| fine | 8004 | `/fines/user/:id`, `/fines/pay`, `/fines/report` |
-| recommendation | 8005 | `/recommendations/user/:id`, `/notifications` |
-
-Autenticação: o `auth` emite um **JWT** (HS256) no corpo do login/registro. O
+A autenticação usa JWT (HS256), emitido pelo Auth no login e no cadastro. O
 frontend o envia em `Authorization: Bearer <token>`. O gateway valida o token e
-injeta `x-user-id` / `x-user-role` nos headers repassados aos serviços.
+repassa a identidade aos serviços nos headers `x-user-id` e `x-user-role`.
 
-## Regras de negócio preservadas do projeto original
+## Serviços e rotas
 
-- status do empréstimo derivado (`pending` / `active` / `overdue` / `returned`);
-- multa de **R$1 por dia** de atraso;
-- reserva = empréstimo sem retirada, que **expira em 30 min** (libera a cópia);
-- **1 cópia por título** por leitor; **máximo de 3** empréstimos ativos;
-- **bloqueio** de novo empréstimo para leitor com **atraso grave**
-  (configurável via `GRAVE_OVERDUE_DAYS`, padrão 7 dias).
+Rotas expostas pelo gateway (prefixo entre parênteses):
 
-## Como rodar localmente (Docker Compose)
+| Serviço         | Porta | Rotas principais                                                        |
+| --------------- | ----- | ----------------------------------------------------------------------- |
+| api-gateway     | 8000  | `/health`, `/health/services`, `/reports`                               |
+| auth            | 8001  | `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`, `/auth/users` |
+| catalog         | 8002  | `/catalog/books`, `/catalog/categories`, `/catalog/slides`              |
+| loan            | 8003  | `/loans`, `/loans/:id/return`, `/loans/:id/renew`, `/loans/:id/pickup`  |
+| fine            | 8004  | `/fines/user/:id`, `/fines/pay`, `/fines/report`                        |
+| recommendation  | 8005  | `/recommendations/user/:id`, `/notifications`                           |
 
-Pré-requisito: Docker + Docker Compose.
+No Docker Compose, o gateway escuta na porta `8000` do container, exposta no host
+em `8080` (`8080:8000`).
+
+## Tecnologias
+
+- **Node.js + TypeScript** (módulos ESM), executados com `tsx`.
+- **Express 4** em cada serviço; **http-proxy-middleware** no gateway.
+- **Prisma 6** para acesso a dados, com um schema por serviço.
+- **jose** para emissão e validação de JWT; **bcryptjs** para hash de senha.
+- **PostgreSQL 16**, com um banco lógico por serviço.
+- **Docker** e **Docker Compose** para orquestração local.
+
+## Execução local (Docker Compose)
+
+Pré-requisito: Docker e Docker Compose.
 
 ```bash
-cp .env.example .env      # ajuste AUTH_SECRET se quiser
+cp .env.example .env      # ajuste AUTH_SECRET, se desejar
 docker compose up --build
 ```
 
-Sobe o Postgres (com 5 bancos lógicos) e os 6 serviços. Quando tudo estiver de
-pé, o gateway responde em `http://localhost:8000`.
+O comando sobe o PostgreSQL — com os cinco bancos lógicos criados pelo script de
+inicialização — e os seis serviços. Quando todos estiverem prontos, o gateway
+responde em `http://localhost:8080`.
 
-Teste rápido:
+Verificação rápida:
+
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/health/services       # status de todos os serviços
-curl http://localhost:8000/catalog/books         # catálogo (público)
+curl http://localhost:8080/health
+curl http://localhost:8080/health/services   # estado de todos os serviços
+curl http://localhost:8080/catalog/books      # catálogo (rota pública)
 ```
 
-**Login padrão (semeado automaticamente):**
-`admin@biblioflix.com` / `admin123` — troque em produção.
+O Auth executa o seed na inicialização, criando um administrador padrão:
 
-O catálogo já nasce com alguns livros e categorias de exemplo (seed).
+```
+admin@biblioflix.com / admin123
+```
+
+Altere essas credenciais antes de qualquer ambiente público. O catálogo também
+nasce com livros e categorias de exemplo.
 
 ## Variáveis de ambiente
 
-| Variável | Onde | Descrição |
-|---|---|---|
-| `AUTH_SECRET` | gateway, auth | Segredo do JWT — **igual** nos dois. |
-| `FRONTEND_ORIGIN` | gateway | Origem liberada no CORS (URL do frontend). |
-| `DATABASE_URL` | cada serviço | Conexão do banco daquele serviço. |
-| `GRAVE_OVERDUE_DAYS` | loan | Dias de atraso que bloqueiam novo empréstimo (padrão 7). |
-| `*_URL` (AUTH_URL, CATALOG_URL, …) | gateway, loan, fine, reco | URLs internas dos serviços. |
+| Variável                            | Serviços                       | Descrição                                                        |
+| ----------------------------------- | ------------------------------ | ---------------------------------------------------------------- |
+| `AUTH_SECRET`                       | gateway, auth                  | Segredo do JWT. Deve ser idêntico nos dois serviços.             |
+| `FRONTEND_ORIGIN`                   | gateway                        | Origem liberada no CORS (URL do frontend).                       |
+| `DATABASE_URL`                      | cada serviço                   | String de conexão do banco daquele serviço.                      |
+| `GRAVE_OVERDUE_DAYS`                | loan                           | Dias de atraso que bloqueiam novo empréstimo (padrão: `7`).      |
+| `AUTH_URL`, `CATALOG_URL`, `LOAN_URL`, `FINE_URL`, `RECOMMENDATION_URL` | gateway, loan, fine, recommendation | URLs internas dos serviços para a comunicação HTTP. |
 
-## Deploy gratuito (sugestão)
+Em produção, gere o `AUTH_SECRET` com um valor aleatório, por exemplo
+`openssl rand -base64 32`.
 
-Caminho 100% em planos gratuitos:
+## Regras de negócio
 
-1. **Banco — Neon (free):** crie um projeto e, dentro dele, os bancos
-   `auth_db`, `catalog_db`, `loan_db`, `fine_db`, `reco_db`. Pegue a connection
-   string de cada um.
-2. **Backend — Render (free):** suba este repositório no GitHub e use o
-   `render.yaml` (Blueprint) como ponto de partida. No painel, preencha:
-   - `DATABASE_URL` de cada serviço (as do Neon);
-   - `AUTH_SECRET` (o mesmo no gateway e no auth);
-   - os `*_URL` do gateway/loan/fine/reco com as URLs públicas dos serviços
-     (algo como `https://biblioflix-auth.onrender.com`) — você só conhece essas
-     URLs **depois** do primeiro deploy, então ajuste e faça redeploy do gateway.
-3. **Frontend — Vercel (free):** no repositório `biblioflix-frontend`, defina
-   `NEXT_PUBLIC_API_URL` = URL pública do gateway.
-4. No gateway, defina `FRONTEND_ORIGIN` = URL da Vercel.
+- O status do empréstimo é derivado: `pending`, `active`, `overdue` ou
+  `returned`.
+- Multa de R$ 1,00 por dia de atraso.
+- Uma reserva é um empréstimo sem retirada e expira em 30 minutos, liberando a
+  cópia automaticamente.
+- Um leitor pode manter no máximo uma cópia por título e três empréstimos ativos
+  ao mesmo tempo.
+- Leitores com atraso grave ficam impedidos de iniciar novos empréstimos. O
+  limite é configurável por `GRAVE_OVERDUE_DAYS` (padrão de 7 dias).
 
-> ⚠️ **Atenção (free tier):** serviços gratuitos do Render **hibernam** após
-> inatividade; a primeira requisição depois disso fica lenta (cold start). Para
-> uma apresentação, acesse cada serviço uma vez antes para "acordá-los".
+## Deploy
 
-## Limitações conhecidas da v1 (próximos passos)
+O projeto roda integralmente em planos gratuitos.
 
-- **Exemplares físicos (PB08/PB21):** a disponibilidade usa contagem
-  (`totalCopies`/`availableCopies`), não exemplares individuais com status. O
-  domínio está pronto para evoluir: criar a entidade `Copy` no Catalog e
-  vincular o empréstimo a uma cópia específica.
-- **Relatório de "livros mais emprestados":** depende de contagem por livro
-  cruzando Catalog × Loan; não está exposto entre serviços ainda. O relatório
-  atual cobre acervo, usuários e empréstimos consolidados.
-- **Fila de reservas:** hoje a reserva segura uma cópia disponível; fila de
-  espera quando não há cópia (PB09) é uma evolução natural do Loan Service.
+1. **Banco — Neon.** Crie um projeto e, dentro dele, os bancos `auth_db`,
+   `catalog_db`, `loan_db`, `fine_db` e `reco_db`. Anote a connection string de
+   cada um.
+2. **Serviços — Render.** Publique o repositório no GitHub e crie um Blueprint a
+   partir do `render.yaml`. No painel, preencha o `DATABASE_URL` de cada serviço
+   (Neon), o `AUTH_SECRET` (igual no gateway e no auth) e as variáveis `*_URL` do
+   gateway, loan, fine e recommendation. Essas URLs só existem após o primeiro
+   deploy, então preencha-as e faça um novo deploy do gateway.
+3. **Frontend — Vercel.** No repositório `biblioflix-frontend`, defina
+   `NEXT_PUBLIC_API_URL` com a URL pública do gateway.
+4. No gateway, defina `FRONTEND_ORIGIN` com a URL da Vercel.
+
+No plano gratuito do Render, os serviços hibernam após um período de
+inatividade, e a primeira requisição seguinte sofre com *cold start*. Antes de
+uma demonstração, acesse cada serviço uma vez para reativá-los.
+
+## Limitações conhecidas
+
+- **Exemplares físicos.** A disponibilidade é calculada por contagem
+  (`totalCopies` / `availableCopies`), e não por exemplares individuais. A
+  evolução natural é introduzir a entidade `Copy` no Catalog e vincular cada
+  empréstimo a uma cópia específica.
+- **Relatório de livros mais emprestados.** Depende de um cruzamento entre
+  Catalog e Loan que ainda não é exposto entre serviços. Os relatórios atuais
+  cobrem acervo, usuários e empréstimos consolidados.
+- **Fila de reservas.** A reserva atual segura uma cópia disponível; a fila de
+  espera para quando não há cópias é uma evolução prevista do Loan.
