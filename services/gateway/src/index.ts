@@ -89,6 +89,18 @@ function proxyKeep(target: string) {
   return createProxyMiddleware({ target, changeOrigin: true });
 }
 
+// Proxy para serviços cujas rotas internas INCLUEM o prefixo (ex.: o loan-service
+// expõe "/loans", o reco expõe "/recommendations" e "/notifications"). Como o
+// Express (app.use("/prefixo", ...)) já remove o prefixo do caminho, aqui nós o
+// RE-ADICIONAMOS antes de encaminhar, senão o serviço receberia "/" e devolveria 404.
+function proxyPrefixed(target: string, prefix: string) {
+  return createProxyMiddleware({
+    target,
+    changeOrigin: true,
+    pathRewrite: (path) => `${prefix}${path === "/" ? "" : path}`,
+  });
+}
+
 // ----- Healthchecks -------------------------------------------------------
 app.get("/health", (_req, res) => {
   res.json({ service: "api-gateway", status: "up", time: new Date().toISOString() });
@@ -195,10 +207,11 @@ app.get("/reports", requireAuth, async (req, res) => {
 app.use("/auth", proxyTo(SERVICES.auth.url, "/auth"));
 app.use("/catalog", proxyTo(SERVICES.catalog.url, "/catalog"));
 // Empréstimos, multas e recomendações exigem usuário autenticado.
-app.use("/loans", requireAuth, proxyTo(SERVICES.loan.url, "/loans"));
+// loan e recommendation/notification têm rotas COM prefixo → proxyPrefixed.
+app.use("/loans", requireAuth, proxyPrefixed(SERVICES.loan.url, "/loans"));
 app.use("/fines", requireAuth, proxyTo(SERVICES.fine.url, "/fines"));
-app.use("/recommendations", requireAuth, proxyKeep(SERVICES.recommendation.url));
-app.use("/notifications", requireAuth, proxyKeep(SERVICES.recommendation.url));
+app.use("/recommendations", requireAuth, proxyPrefixed(SERVICES.recommendation.url, "/recommendations"));
+app.use("/notifications", requireAuth, proxyPrefixed(SERVICES.recommendation.url, "/notifications"));
 
 app.listen(PORT, () => {
   console.log(`[gateway] ouvindo na porta ${PORT}`);
