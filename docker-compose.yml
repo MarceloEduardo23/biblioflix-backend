@@ -39,6 +39,8 @@ services:
     environment:
       PORT: 8002
       DATABASE_URL: postgresql://biblioflix:biblioflix@postgres:5432/catalog_db
+      # Permite a trava "não apagar livro com empréstimo ativo" (fail-open).
+      LOAN_URL: http://loan-service:8003
     ports:
       - "8002:8002"
     depends_on:

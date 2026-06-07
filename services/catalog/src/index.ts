@@ -80,6 +80,29 @@ app.patch("/books/:id", async (req, res) => {
 
 app.delete("/books/:id", async (req, res) => {
   if (!isStaff(caller(req).role)) return res.status(403).json({ error: "Sem permissão." });
+  // Trava de integridade entre serviços: não apaga um livro que tem empréstimo
+  // ou reserva ativo. Pergunta ao Loan Service. "Fail-open": se o LOAN_URL não
+  // estiver configurado ou o serviço estiver fora, a remoção segue (não trava o
+  // admin) — e a tela continua protegida pela trava do próprio Loan Service.
+  const LOAN_URL = process.env.LOAN_URL;
+  if (LOAN_URL) {
+    try {
+      const r = await fetch(`${LOAN_URL}/loans/raw`);
+      if (r.ok) {
+        const data: any = await r.json();
+        const temAtivo = (data.loans ?? []).some(
+          (l: any) => l.bookId === req.params.id && !l.returnDate
+        );
+        if (temAtivo) {
+          return res.status(409).json({
+            error: "Não é possível remover: há empréstimo ou reserva ativo para este livro. Registre a devolução antes.",
+          });
+        }
+      }
+    } catch {
+      // Loan Service indisponível: segue com a remoção (fail-open).
+    }
+  }
   await prisma.book.delete({ where: { id: req.params.id } }).catch(() => null);
   res.json({ ok: true });
 });

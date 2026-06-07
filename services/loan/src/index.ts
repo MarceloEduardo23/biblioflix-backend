@@ -69,6 +69,18 @@ async function serializeLoans(loans: any[]) {
   return loans.map((loan) => {
     const status = loanStatus(loan);
     const fine = status === "overdue" ? computeOverdueDays(loan.dueDate) : 0;
+    // Trava de robustez: se o livro/usuário não puder ser resolvido (foi apagado
+    // em outro serviço, ou o serviço está fora do ar), devolvemos um objeto
+    // seguro com rótulo "removido" em vez de null. Assim o frontend nunca quebra
+    // ao ler loan.book.title / loan.user.name.
+    const book = books.get(loan.bookId) ?? {
+      id: loan.bookId, title: "Livro removido", author: "—", cover: "",
+      genre: "—", isbn: "", description: "", publishedYear: 0,
+      totalCopies: 0, availableCopies: 0, rating: 0, removed: true,
+    };
+    const user = users.get(loan.userId) ?? {
+      id: loan.userId, name: "Usuário removido", email: "", role: "reader", removed: true,
+    };
     return {
       id: loan.id, bookId: loan.bookId, userId: loan.userId,
       loanDate: loan.loanDate.toISOString(), dueDate: loan.dueDate.toISOString(),
@@ -76,8 +88,8 @@ async function serializeLoans(loans: any[]) {
       reservationExpiresAt: !loan.pickedUpAt && !loan.returnDate
         ? new Date(loan.loanDate.getTime() + RESERVATION_MINUTES * 60 * 1000).toISOString() : undefined,
       renewals: loan.renewals, status, fine,
-      book: books.get(loan.bookId) ?? null,
-      user: users.get(loan.userId) ?? null,
+      book,
+      user,
     };
   });
 }
